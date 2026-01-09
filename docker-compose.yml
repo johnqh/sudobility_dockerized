@@ -1,0 +1,122 @@
+# Sudobility Dockerized - Docker Compose Configuration
+# This file is a template - setup.sh will copy and customize it
+
+services:
+  # =============================================================================
+  # Traefik - Reverse Proxy & SSL Termination
+  # =============================================================================
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      # API and Dashboard
+      - "--api.dashboard=false"
+      - "--api.insecure=false"
+      # Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=sudobility_network"
+      # Dynamic configuration
+      - "--providers.file.directory=/etc/traefik/dynamic_conf"
+      - "--providers.file.watch=true"
+      # Entry points
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # HTTP to HTTPS redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Let's Encrypt (uncommented during setup)
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      # - "--certificatesresolvers.letsencrypt.acme.email=ACME_EMAIL"
+      # - "--certificatesresolvers.letsencrypt.acme.storage=/data/acme.json"
+      # Logging
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_data:/data
+      - ./dynamic_conf:/etc/traefik/dynamic_conf:ro
+    networks:
+      - sudobility_network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # =============================================================================
+  # ShapeShyft API
+  # =============================================================================
+  shapeshyft_api:
+    build:
+      context: ../shapeshyft_api
+    container_name: shapeshyft_api
+    restart: unless-stopped
+    env_file:
+      - .env.shapeshyft_api
+    labels:
+      # Enable Traefik
+      - "traefik.enable=true"
+      # Router configuration
+      - "traefik.http.routers.shapeshyft-api.rule=Host(`API_HOSTNAME`) && PathPrefix(`/shapeshyft`)"
+      - "traefik.http.routers.shapeshyft-api.entrypoints=websecure"
+      - "traefik.http.routers.shapeshyft-api.tls.certresolver=letsencrypt"
+      # Strip /shapeshyft prefix before forwarding
+      - "traefik.http.middlewares.shapeshyft-strip.stripprefix.prefixes=/shapeshyft"
+      - "traefik.http.routers.shapeshyft-api.middlewares=shapeshyft-strip"
+      # Service configuration
+      - "traefik.http.services.shapeshyft-api.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    networks:
+      - sudobility_network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # =============================================================================
+  # Add more services below following the same pattern:
+  #
+  # new_service:
+  #   build:
+  #     context: ../new_service
+  #   container_name: new_service
+  #   restart: unless-stopped
+  #   env_file:
+  #     - .env.new_service
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.new-service.rule=Host(`API_HOSTNAME`) && PathPrefix(`/newservice`)"
+  #     - "traefik.http.routers.new-service.entrypoints=websecure"
+  #     - "traefik.http.routers.new-service.tls.certresolver=letsencrypt"
+  #     - "traefik.http.middlewares.newservice-strip.stripprefix.prefixes=/newservice"
+  #     - "traefik.http.routers.new-service.middlewares=newservice-strip"
+  #     - "traefik.http.services.new-service.loadbalancer.server.port=3000"
+  #   networks:
+  #     - sudobility_network
+  # =============================================================================
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  traefik_data:
+    name: sudobility_traefik_data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  sudobility_network:
+    name: sudobility_network
+    driver: bridge

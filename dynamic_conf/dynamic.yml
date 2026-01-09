@@ -1,0 +1,16 @@
+# Traefik Dynamic Configuration
+# This file can be used for additional TLS certificates or middleware
+
+# TLS Configuration (if using custom certificates)
+# tls:
+#   certificates:
+#     - certFile: /etc/traefik/certs/cert.pem
+#       keyFile: /etc/traefik/certs/key.pem
+
+# Additional middleware definitions can go here
+# http:
+#   middlewares:
+#     rate-limit:
+#       rateLimit:
+#         average: 100
+#         burst: 50
