@@ -1,5 +1,5 @@
 #!/bin/bash
-# upgrade.sh - Upgrade script for Sudobility Dockerized
+# upgrade.sh - Upgrade an existing service
 # Usage: ./upgrade.sh
 
 set -e
@@ -10,172 +10,114 @@ cd "$SCRIPT_DIR"
 
 # Source helper scripts
 source "./setup-scripts/common.sh"
-source "./setup-scripts/doppler.sh"
-source "./setup-scripts/traefik.sh"
-
-# =============================================================================
-# Check Configuration Exists
-# =============================================================================
-
-check_config_exists() {
-    [ -d "$CONFIG_DIR" ] && [ -f "${CONFIG_DIR}/docker-compose.yml" ]
-}
 
 # =============================================================================
 # Main Upgrade Flow
 # =============================================================================
 
-print_header "Sudobility Dockerized Upgrade"
+print_header "Upgrade Service"
 
-# Check for existing configuration (CONFIG_DIR is defined in common.sh)
-if ! check_config_exists; then
-    print_error "No existing configuration found in ${CONFIG_DIR}/"
-    print_info "Run ./setup.sh first to create initial configuration."
-    exit 1
+# Get list of services (bash 3.x compatible)
+read_services_array
+
+if [ ${#SERVICES[@]} -eq 0 ]; then
+    print_warning "No services found. Use add.sh to add a service first."
+    exit 0
 fi
 
-print_success "Found configuration in: ${CONFIG_DIR}"
+echo "Select a service to upgrade:"
 
-# Load deployment config
-if load_deployment_config; then
-    print_success "Loaded deployment config: API_HOSTNAME=${API_HOSTNAME}"
-else
-    print_warning "Could not load deployment config, will extract from docker-compose.yml"
-
-    # Try to extract hostname from docker-compose.yml
-    API_HOSTNAME=$(grep -oP "Host\(\`\K[^\`]+" "${CONFIG_DIR}/docker-compose.yml" | head -1 || echo "")
-
-    if [ -z "$API_HOSTNAME" ]; then
-        print_error "Could not determine API hostname"
-        exit 1
-    fi
+if ! select_service "Select service" "${SERVICES[@]}"; then
+    print_info "Upgrade cancelled."
+    exit 0
 fi
 
-echo ""
-echo "This script will:"
-echo "  1. Update Doppler secrets"
-echo "  2. Update docker-compose.yml"
-echo "  3. Pull latest images and restart containers"
-echo ""
+SERVICE_NAME="$SELECTED_SERVICE"
+SERVICE_DIR="${SERVICES_DIR}/${SERVICE_NAME}"
 
-if ! prompt_yes_no "Continue with upgrade?" "y"; then
+print_info "Selected: $SERVICE_NAME"
+
+# =============================================================================
+# Confirm upgrade
+# =============================================================================
+
+echo ""
+if ! prompt_yes_no "Upgrade $SERVICE_NAME?" "y"; then
     print_info "Upgrade cancelled."
     exit 0
 fi
 
 # =============================================================================
-# Step 1: Update Doppler Secrets
+# Step 1: Update environment from Doppler
 # =============================================================================
-print_header "Step 1: Updating Doppler Secrets"
+print_header "Step 1: Updating Environment Variables"
 
-for container_name in $(get_container_names); do
-    update_doppler_secrets "$container_name"
-done
+DOPPLER_TOKEN=$(get_doppler_token "$SERVICE_NAME")
 
-# =============================================================================
-# Step 2: Update Docker Compose
-# =============================================================================
-print_header "Step 2: Updating Docker Compose"
+if [ -n "$DOPPLER_TOKEN" ]; then
+    print_info "Fetching latest secrets from Doppler..."
 
-# Backup current docker-compose.yml
-cp "${CONFIG_DIR}/docker-compose.yml" "${CONFIG_DIR}/docker-compose.yml.backup"
-print_success "Backed up docker-compose.yml"
+    ENV_FILE="${SERVICE_DIR}/.env"
+    ENV_BACKUP="${SERVICE_DIR}/.env.backup"
 
-# Copy new docker-compose.yml
-cp docker-compose.yml "${CONFIG_DIR}/docker-compose.yml"
-print_success "Copied new docker-compose.yml template"
-
-# Update hostname placeholders
-update_hostname_placeholders "$API_HOSTNAME" "${CONFIG_DIR}/docker-compose.yml"
-
-# Restore Let's Encrypt settings if they were enabled
-if grep -q "certificatesresolvers.letsencrypt.acme.email" "${CONFIG_DIR}/docker-compose.yml.backup" 2>/dev/null && \
-   ! grep -q "# - \"--certificatesresolvers.letsencrypt.acme.email" "${CONFIG_DIR}/docker-compose.yml.backup" 2>/dev/null; then
-
-    # Extract email from backup
-    ACME_EMAIL=$(grep -oP 'acme.email=\K[^"]+' "${CONFIG_DIR}/docker-compose.yml.backup" || echo "")
-
-    if [ -n "$ACME_EMAIL" ]; then
-        setup_letsencrypt "$API_HOSTNAME" "$ACME_EMAIL" "${CONFIG_DIR}/docker-compose.yml"
-        print_success "Restored Let's Encrypt configuration"
+    # Backup current env
+    if [ -f "$ENV_FILE" ]; then
+        cp "$ENV_FILE" "$ENV_BACKUP"
     fi
-fi
 
-# Update dynamic config
-if [ -d "dynamic_conf" ]; then
-    cp -r dynamic_conf/* "${CONFIG_DIR}/dynamic_conf/"
-    print_success "Updated Traefik dynamic configuration"
-fi
+    HTTP_CODE=$(fetch_doppler_secrets "$DOPPLER_TOKEN" "$ENV_FILE")
 
-# Regenerate .env file for docker-compose variable substitution
-print_info "Updating docker-compose environment file..."
-echo "# Docker Compose environment variables (auto-generated)" > "${CONFIG_DIR}/.env"
-for container_name in $(get_container_names); do
-    env_file="${CONFIG_DIR}/.env.${container_name}"
-    if [ -f "$env_file" ]; then
-        port=$(grep "^PORT=" "$env_file" | cut -d'=' -f2 | tr -d '"')
-        if [ -n "$port" ]; then
-            # Convert container name to uppercase for env var (e.g., shapeshyft_api -> SHAPESHYFT_PORT)
-            var_name=$(echo "${container_name}" | tr '[:lower:]' '[:upper:]' | sed 's/_API$//')_PORT
-            echo "${var_name}=${port}" >> "${CONFIG_DIR}/.env"
-            print_success "Set ${var_name}=${port}"
+    if [ "$HTTP_CODE" = "200" ]; then
+        secure_file "$ENV_FILE"
+        print_success "Environment variables updated"
+
+        # Update PORT in service config if changed
+        NEW_PORT=$(grep "^PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+        OLD_PORT=$(get_service_config "$SERVICE_NAME" "PORT")
+
+        if [ -n "$NEW_PORT" ] && [ "$NEW_PORT" != "$OLD_PORT" ]; then
+            print_warning "PORT changed: $OLD_PORT → $NEW_PORT"
+            # Update docker-compose.yml with new port
+            sed -i.bak "s/server.port=${OLD_PORT}/server.port=${NEW_PORT}/g" "${SERVICE_DIR}/docker-compose.yml"
+            sed -i.bak "s/localhost:${OLD_PORT}/localhost:${NEW_PORT}/g" "${SERVICE_DIR}/docker-compose.yml"
+            rm -f "${SERVICE_DIR}/docker-compose.yml.bak"
+
+            # Update service config
+            sed -i.bak "s/^PORT=.*/PORT=${NEW_PORT}/" "${SERVICE_DIR}/.service.conf"
+            rm -f "${SERVICE_DIR}/.service.conf.bak"
+        fi
+    else
+        print_warning "Failed to fetch secrets (HTTP $HTTP_CODE), using existing environment"
+        if [ -f "$ENV_BACKUP" ]; then
+            mv "$ENV_BACKUP" "$ENV_FILE"
         fi
     fi
-done
+else
+    print_warning "No Doppler token found, skipping environment update"
+fi
 
 # =============================================================================
-# Step 3: Pull and Restart Containers
+# Step 2: Pull and restart
 # =============================================================================
-print_header "Step 3: Pulling and Restarting Containers"
+print_header "Step 2: Pulling Latest Image"
 
-DOCKER_COMPOSE=$(get_docker_compose_cmd)
+service_pull "$SERVICE_NAME"
 
-cd "$CONFIG_DIR"
+print_header "Step 3: Restarting Service"
 
-# Stop containers
-print_info "Stopping containers..."
-$DOCKER_COMPOSE down
-
-# Pull latest images for all services
-print_info "Pulling latest images..."
-$DOCKER_COMPOSE pull
-
-# Start containers
-print_info "Starting containers..."
-$DOCKER_COMPOSE up -d
-
-cd "$SCRIPT_DIR"
-
-# Wait for services
-print_info "Waiting for services to start..."
-sleep 10
+service_stop "$SERVICE_NAME"
+service_start "$SERVICE_NAME"
 
 # =============================================================================
-# Step 4: Verify Upgrade
+# Verify
 # =============================================================================
-print_header "Step 4: Verifying Upgrade"
+print_header "Verification"
 
-cd "$CONFIG_DIR"
-
-echo ""
-echo "Container Status:"
-$DOCKER_COMPOSE ps
-
-echo ""
-echo "Image Versions:"
-$DOCKER_COMPOSE images
-
-cd "$SCRIPT_DIR"
-
-# =============================================================================
-# Upgrade Complete
-# =============================================================================
-print_header "Upgrade Complete!"
-
-echo "Your services have been updated."
-echo ""
-echo "If you encounter issues, you can restore the previous docker-compose.yml:"
-echo "  cp ${CONFIG_DIR}/docker-compose.yml.backup ${CONFIG_DIR}/docker-compose.yml"
-echo ""
-
-print_success "Upgrade completed successfully!"
+if service_wait_and_verify "$SERVICE_NAME"; then
+    display_service_info "$SERVICE_NAME" name status health version hostname
+    print_success "Service '$SERVICE_NAME' upgraded successfully!"
+else
+    display_service_info "$SERVICE_NAME" name status health version hostname
+    print_warning "Service may not have started correctly. Check logs:"
+    echo "  cd ${SERVICE_DIR} && docker compose logs"
+fi

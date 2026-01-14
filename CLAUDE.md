@@ -2,181 +2,220 @@
 
 ## Project Overview
 
-**Sudobility Dockerized** is a Docker deployment system for Sudobility backend APIs. It provides automated setup, upgrade, and management scripts with Traefik reverse proxy and Doppler secrets management.
+**Sudobility Dockerized** is a flexible Docker deployment system for managing multiple backend services. It provides automated add, upgrade, and remove scripts with Traefik reverse proxy, automatic SSL via Let's Encrypt, and Doppler secrets management.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Internet                              │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ HTTPS (443)
-                          ▼
+                           Internet
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │ api.shapeshyft.ai   │   api.other.com    │
+        ▼                     ▼                     ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Traefik (Reverse Proxy)                   │
-│  - SSL termination (Let's Encrypt)                          │
-│  - Path-based routing                                        │
+│  - SSL termination (Let's Encrypt ACME)                     │
+│  - Host-based routing (no path prefix)                      │
 │  - HTTP → HTTPS redirect                                     │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-        ┌─────────────────┴─────────────────┐
-        │ /shapeshyft/*                     │ /future/*
-        ▼                                   ▼
-┌───────────────────┐               ┌───────────────────┐
-│  shapeshyft_api   │               │   future_api      │
-│  (Port 3000)      │               │   (Port 300X)     │
-└───────────────────┘               └───────────────────┘
+│  - Docker label-based discovery                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┴─────────────────────┐
+        │ Host: api.shapeshyft.ai                   │ Host: api.other.com
+        ▼                                           ▼
+┌───────────────────┐                       ┌───────────────────┐
+│  shapeshyft_api   │                       │    other_api      │
+│  (Port 3000)      │                       │    (Port 8080)    │
+└───────────────────┘                       └───────────────────┘
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `setup.sh` | Main installation script - runs once for initial setup |
-| `upgrade.sh` | Updates existing installation with new code/secrets |
-| `versions.sh` | Displays version and status information |
-| `docker-compose.yml` | Template with placeholder `API_HOSTNAME` |
-| `setup-scripts/common.sh` | Shared utilities, colors, container registry |
-| `setup-scripts/doppler.sh` | Doppler API integration for secrets |
-| `setup-scripts/traefik.sh` | Traefik and Let's Encrypt configuration |
-| `default-config/<container>/.env.defaults` | Non-sensitive default values |
+| `add.sh` | Add a new service interactively |
+| `upgrade.sh` | Upgrade an existing service |
+| `remove.sh` | Remove a service with confirmation |
+| `status.sh` | Display status of all services |
+| `setup-scripts/common.sh` | Shared utilities, Traefik, Doppler, service management |
 
-## Container Registry
+## Directory Structure
 
-New containers are registered in `setup-scripts/common.sh`:
+```
+sudobility_dockerized/
+├── add.sh
+├── upgrade.sh
+├── remove.sh
+├── status.sh
+├── setup-scripts/
+│   └── common.sh
+└── config-generated/           # Auto-generated, gitignored
+    ├── traefik/
+    │   └── docker-compose.yml
+    ├── services/
+    │   └── <service_name>/
+    │       ├── docker-compose.yml
+    │       ├── .env
+    │       └── .service.conf
+    └── .doppler-tokens/
+        └── <service_name>
+```
+
+## Service Management Flow
+
+### Adding a Service
 
 ```bash
-CONTAINERS=(
-    "container_name:Display Name:port"
-)
+./add.sh
 ```
 
-This array drives all script behavior - setup, upgrade, and versions.
+1. Ensures Traefik is running (installs if needed)
+2. Prompts for: service name, hostname, Docker image, health endpoint (optional)
+3. Prompts for Doppler service token, validates it
+4. Fetches secrets from Doppler, requires `PORT` env var
+5. Creates service directory with docker-compose.yml and .env
+6. Starts the service container
 
-## Doppler Integration Pattern
+### Upgrading a Service
 
+```bash
+./upgrade.sh
 ```
-1. Check for saved token: .doppler-token-<container>
-2. If not found, prompt user
-3. Validate token via Doppler API
-4. Download secrets as .env format
-5. Merge with defaults (Doppler takes precedence)
-6. Output to config-generated/.env.<container>
+
+1. Lists all services with status
+2. User selects a service
+3. Fetches latest secrets from Doppler
+4. Updates PORT in config if changed
+5. Pulls latest Docker image
+6. Restarts the service
+
+### Removing a Service
+
+```bash
+./remove.sh
 ```
 
-Key functions in `setup-scripts/doppler.sh`:
-- `get_doppler_token()` - Load or prompt for token
-- `fetch_doppler_secrets()` - Download from Doppler API
-- `merge_env_files()` - Combine defaults + secrets
-- `setup_doppler_for_container()` - Full setup flow
+1. Lists all services with status
+2. User selects a service
+3. Confirms removal (yes/no + type service name)
+4. Stops and removes container
+5. Removes Doppler token and service directory
 
-## Traefik Routing Pattern
+## Traefik Routing
 
-Each container needs these labels in `docker-compose.yml`:
+Each service gets these Docker labels (auto-generated):
 
 ```yaml
 labels:
   - "traefik.enable=true"
-  - "traefik.http.routers.<name>.rule=Host(`API_HOSTNAME`) && PathPrefix(`/<path>`)"
+  - "traefik.http.routers.<name>.rule=Host(`<hostname>`)"
   - "traefik.http.routers.<name>.entrypoints=websecure"
   - "traefik.http.routers.<name>.tls.certresolver=letsencrypt"
-  - "traefik.http.middlewares.<name>-strip.stripprefix.prefixes=/<path>"
-  - "traefik.http.routers.<name>.middlewares=<name>-strip"
   - "traefik.http.services.<name>.loadbalancer.server.port=<port>"
 ```
 
-`API_HOSTNAME` is replaced during setup.
+**Key points:**
+- Host-based routing (no PathPrefix) - services accessible at hostname root
+- Each service has unique router name preventing conflicts
+- SSL certificates automatically provisioned per hostname
+- All services share `sudobility_network` Docker network
 
-## Common Tasks
+## Doppler Integration
 
-### Add a new container
+```
+1. User provides Doppler service token for each service
+2. Token validated via Doppler API
+3. Secrets fetched as .env format
+4. PORT variable required (determines Traefik port routing)
+5. Token saved securely for upgrade operations
+```
 
-1. Create `default-config/<name>/.env.defaults`
-2. Add to `CONTAINERS` array in `setup-scripts/common.sh`
-3. Add service block in `docker-compose.yml`
-4. Create Doppler config with secrets
-5. Run `./setup.sh`
-
-### Modify Doppler integration
-
-Edit `setup-scripts/doppler.sh`. Key API endpoint:
+Key API endpoint:
 ```
 https://api.doppler.com/v3/configs/config/secrets/download?format=env
 ```
-Auth: Basic auth with token as username, empty password.
 
-### Change routing paths
+## Common Tasks
 
-Edit Traefik labels in `docker-compose.yml`. The `PathPrefix` rule determines the URL path, and `stripprefix` middleware removes it before forwarding.
+### Add a new service
 
-### Add environment variables
+```bash
+./add.sh
+# Follow prompts for:
+#   - Service name (e.g., my_api)
+#   - Hostname (e.g., api.example.com)
+#   - Docker image (e.g., docker.io/user/image:latest)
+#   - Health endpoint (e.g., /health) - optional
+#   - Doppler service token
+```
 
-1. Non-sensitive: Add to `default-config/<container>/.env.defaults`
-2. Sensitive: Add to Doppler, will be fetched automatically
+### Check status
+
+```bash
+./status.sh
+```
+
+### View logs
+
+```bash
+cd config-generated/services/<name>
+docker compose logs -f
+```
+
+### Manually restart a service
+
+```bash
+cd config-generated/services/<name>
+docker compose restart
+```
+
+## Environment Variables
+
+Each service must have these in Doppler:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Yes | Port the service listens on |
+| Others | Varies | Service-specific secrets |
 
 ## Code Conventions
 
-- **Bash scripts**: Use `set -e` for fail-fast, source helpers at top
-- **Functions**: Defined in setup-scripts/, prefixed by domain (e.g., `setup_doppler_*`)
-- **Output**: Use `print_success`, `print_error`, `print_warning`, `print_info` from common.sh
-- **Config paths**: Use `$CONFIG_DIR` variable (default: `config-generated`)
+- **Bash scripts**: Use `set -e` for fail-fast, source common.sh at top
+- **Output**: Use `print_success`, `print_error`, `print_warning`, `print_info`
 - **Docker Compose**: Use `$(get_docker_compose_cmd)` for v1/v2 compatibility
+- **Arrays**: Use `read_services_array` for bash 3.x (macOS) compatibility
 
 ## File Permissions
 
-- `.doppler-token-*`: 600 (owner read/write only)
-- `.env.*` in config-generated: 600
-- Scripts: 755 (executable)
+- `.doppler-tokens/*`: 700 directory, 600 files
+- `.env`: 600
+- `.service.conf`: 600
+- Scripts: 755
 
 ## Dependencies
 
 - **Docker**: Container runtime
 - **Docker Compose v2**: Orchestration (falls back to v1)
 - **curl**: Doppler API calls
-- **jq**: JSON parsing (versions.sh)
-- **sed**: Text replacement in configs
-
-## Testing Changes
-
-```bash
-# Dry run - check syntax
-bash -n setup.sh
-
-# Test with fresh config
-rm -rf config-generated
-./setup.sh
-
-# Check container status
-./versions.sh
-
-# View logs
-cd config-generated && docker compose logs -f
-```
-
-## Related Projects
-
-- `../shapeshyft_api` - ShapeShyft API source code (Bun/Hono)
-- Reference: `~/0xmail/wildduck-dockerized` - Original pattern source
-
-## Environment Variables Reference
-
-### shapeshyft_api
-
-| Variable | Type | Required | Source |
-|----------|------|----------|--------|
-| `PORT` | int | No | defaults (3000) |
-| `NODE_ENV` | string | No | defaults (production) |
-| `DATABASE_URL` | string | Yes | Doppler |
-| `ENCRYPTION_KEY` | string | Yes | Doppler (64 hex chars) |
-| `FIREBASE_PROJECT_ID` | string | Yes | Doppler |
-| `FIREBASE_CLIENT_EMAIL` | string | Yes | Doppler |
-| `FIREBASE_PRIVATE_KEY` | string | Yes | Doppler |
-| `REVENUECAT_API_KEY` | string | No | Doppler |
+- **bash**: Script execution (3.x compatible)
 
 ## Gotchas
 
-1. **Hostname placeholder**: `API_HOSTNAME` in docker-compose.yml is literal text, replaced by sed during setup
-2. **Let's Encrypt**: Commented lines in Traefik command are uncommented during setup
-3. **Path stripping**: `/shapeshyft/api/v1/users` becomes `/api/v1/users` at the container
-4. **Doppler merge**: Doppler values always override defaults, never vice versa
-5. **macOS sed**: Scripts use `sed -i.bak` pattern for macOS compatibility, then clean up .bak files
+1. **Network order**: Traefik creates `sudobility_network`; services use it as external
+2. **Let's Encrypt**: HTTP challenge requires port 80 accessible from internet
+3. **Hostname DNS**: Must point to server IP before SSL works
+4. **Service names**: Must be unique across all services (used as container name)
+5. **macOS**: Scripts use bash 3.x compatible patterns (no mapfile)
+
+## Testing
+
+```bash
+# Check syntax
+bash -n add.sh
+
+# View all services
+./status.sh
+
+# Check Traefik logs
+cd config-generated/traefik && docker compose logs -f
+```
