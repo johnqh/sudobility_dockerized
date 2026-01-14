@@ -52,8 +52,7 @@ services:
   # ShapeShyft API
   # =============================================================================
   shapeshyft_api:
-    build:
-      context: ../../shapeshyft_api
+    image: docker.io/johnqh/shapeshyft_api:latest
     container_name: shapeshyft_api
     restart: unless-stopped
     env_file:
