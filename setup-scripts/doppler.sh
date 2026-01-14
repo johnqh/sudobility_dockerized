@@ -49,7 +49,7 @@ prompt_doppler_token() {
     local valid=false
 
     while [ "$valid" = false ]; do
-        read -p "Enter Doppler service token for ${container_name}: " token </dev/tty
+        read -p "Enter Doppler service token for ${container_name}: " token
 
         if [ -z "$token" ]; then
             print_error "Token cannot be empty" >&2

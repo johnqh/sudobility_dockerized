@@ -102,7 +102,7 @@ prompt_hostname() {
 
     local hostname=""
     while [ -z "$hostname" ]; do
-        read -p "Enter API hostname: " hostname </dev/tty
+        read -p "Enter API hostname: " hostname
 
         if [ -z "$hostname" ]; then
             print_error "Hostname cannot be empty" >&2
@@ -123,7 +123,7 @@ prompt_acme_email() {
     echo "   This email will receive certificate expiry notifications" >&2
     echo "" >&2
 
-    read -p "Enter email for Let's Encrypt [${default_email}]: " email </dev/tty
+    read -p "Enter email for Let's Encrypt [${default_email}]: " email
     email="${email:-$default_email}"
 
     echo "$email"
