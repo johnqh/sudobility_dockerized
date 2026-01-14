@@ -1,276 +1,342 @@
 # Sudobility Dockerized
 
-Docker deployment system for Sudobility backend APIs with Traefik reverse proxy and Doppler secrets management.
+A flexible Docker deployment system for managing multiple backend services with Traefik reverse proxy, automatic SSL via Let's Encrypt, and Doppler secrets management.
+
+## Features
+
+- **Per-service management**: Add, upgrade, and remove services independently
+- **Host-based routing**: Each service gets its own hostname (e.g., `api.example.com`)
+- **Automatic SSL**: Let's Encrypt certificates via ACME HTTP challenge
+- **Secrets management**: Environment variables from Doppler
+- **Health checks**: Optional health endpoint monitoring
+- **Cloudflare compatible**: Works with Cloudflare proxy enabled
 
 ## Prerequisites
 
 - Docker and Docker Compose v2+
 - curl
-- jq
-- A domain name pointing to your server
+- bash 3.2+ (macOS) or 4+ (Linux)
+- A domain name with DNS pointing to your server
 - Doppler account with service tokens
+
+## Architecture
+
+```
+                           Internet
+                              |
+        +---------------------+---------------------+
+        | api.shapeshyft.ai   |   api.other.com    |
+        v                     v                     v
++-------------------------------------------------------------+
+|                    Traefik (Reverse Proxy)                   |
+|  - SSL termination (Let's Encrypt ACME)                     |
+|  - Host-based routing (no path prefix)                      |
+|  - HTTP -> HTTPS redirect                                    |
+|  - Docker label-based service discovery                      |
++-------------------------------------------------------------+
+                              |
+        +---------------------+---------------------+
+        | Host: api.shapeshyft.ai                   | Host: api.other.com
+        v                                           v
++-------------------+                       +-------------------+
+|  shapeshyft_api   |                       |    other_api      |
+|  (Port 8020)      |                       |    (Port 3000)    |
++-------------------+                       +-------------------+
+```
 
 ## Quick Start
 
+### Adding Your First Service
+
 ```bash
-# Clone and enter directory
-cd sudobility_dockerized
-
-# Run setup
-./setup.sh
+./add.sh
 ```
 
-The setup script will:
-1. Check dependencies
-2. Prompt for API hostname
-3. Prompt for Doppler service tokens
-4. Configure Let's Encrypt SSL
-5. Build and start containers
+You'll be prompted for:
+1. **Service name**: Container name (e.g., `shapeshyft_api`)
+2. **Hostname**: Public URL (e.g., `api.shapeshyft.ai`)
+3. **Docker image**: Image to pull (e.g., `docker.io/username/image:latest`)
+4. **Health check**: Use `/health` endpoint or skip
+5. **Doppler token**: Service token for secrets
 
-## Doppler Configuration
+The script will:
+- Install Traefik if not running
+- Fetch environment variables from Doppler
+- Create service configuration
+- Pull the Docker image
+- Start the container with SSL enabled
 
-Each container requires its own Doppler configuration. Create a Doppler project and add configs for each service.
+### Example: Deploy ShapeShyft API
 
-### shapeshyft_api
+```bash
+./add.sh
 
-Create a Doppler config named `shapeshyft_api` with these secrets:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `ENCRYPTION_KEY` | Yes | 64-char hex string (generate: `openssl rand -hex 32`) |
-| `FIREBASE_PROJECT_ID` | Yes | Firebase project ID |
-| `FIREBASE_CLIENT_EMAIL` | Yes | Firebase service account email |
-| `FIREBASE_PRIVATE_KEY` | Yes | Firebase private key (with newlines) |
-| `REVENUECAT_API_KEY` | No | RevenueCat API key for rate limiting |
-
-### Generating a Service Token
-
-1. Go to Doppler Dashboard
-2. Select your project
-3. Navigate to the config (e.g., `shapeshyft_api`)
-4. Go to **Access** → **Service Tokens**
-5. Generate a new token
-6. Save the token - you'll enter it during setup
-
-## Directory Structure
-
-```
-sudobility_dockerized/
-├── setup.sh                    # Initial setup
-├── upgrade.sh                  # Update containers
-├── versions.sh                 # Show version info
-├── docker-compose.yml          # Compose template
-├── .env.example                # Environment documentation
-├── default-config/
-│   └── shapeshyft_api/
-│       └── .env.defaults       # Non-sensitive defaults
-├── setup-scripts/
-│   ├── common.sh               # Shared utilities
-│   ├── doppler.sh              # Doppler integration
-│   └── traefik.sh              # Traefik/SSL setup
-├── dynamic_conf/
-│   └── dynamic.yml             # Traefik dynamic config
-└── config-generated/           # Created by setup.sh
-    ├── docker-compose.yml      # Customized compose
-    ├── .env.shapeshyft_api     # Container env file
-    └── .deployment-config      # Saved settings
+# Enter when prompted:
+# Service name: shapeshyft_api
+# Hostname: api.shapeshyft.ai
+# Docker image: docker.io/johnqh/shapeshyft_api:latest
+# Health check: 1 (Use /health endpoint)
+# Doppler token: dp.st.xxx...
 ```
 
 ## Commands
 
-### Initial Setup
+### Add a Service
 
 ```bash
-./setup.sh
+./add.sh
 ```
 
-Performs first-time installation. Prompts for:
-- API hostname (e.g., `api.example.com`)
-- ACME email for Let's Encrypt
-- Doppler service tokens for each container
+Interactively add a new service with:
+- Automatic Traefik installation
+- Doppler token validation
+- SSL certificate provisioning
+- Health check configuration
 
-### Upgrade
+### Check Status
+
+```bash
+./status.sh
+```
+
+Displays all services with:
+- Container status (running/stopped)
+- Health check status
+- Version (Docker image tag)
+- Uptime
+- Hostname
+
+Example output:
+```
+Infrastructure:
+─────────────────────────────────────────────────────────────────────────────────────
+  Traefik:  Status: running  Health: no healthcheck  Uptime: 11h 41m
+
+Services:
+
+#    SERVICE              STATUS       HEALTH       VERSION    UPTIME       HOSTNAME
+───────────────────────────────────────────────────────────────────────────────────────────────
+1    shapeshyft_api       running      healthy      latest     6s           api.shapeshyft.ai
+```
+
+### Upgrade a Service
 
 ```bash
 ./upgrade.sh
 ```
 
-Updates existing installation:
-- Refreshes secrets from Doppler
-- Updates docker-compose.yml
-- Rebuilds and restarts containers
+Select a service to:
+- Refresh secrets from Doppler
+- Pull the latest Docker image
+- Restart the container
 
-### Version Info
+### Remove a Service
 
 ```bash
-./versions.sh
+./remove.sh
 ```
 
-Displays:
-- Docker/Compose versions
-- Container status and health
-- Application versions
-- Resource usage
+Select a service to remove with:
+- Double confirmation (yes/no + type service name)
+- Container and volume removal
+- Configuration cleanup
 
-### Manual Container Management
+## Directory Structure
+
+```
+sudobility_dockerized/
+├── add.sh                      # Add new service
+├── upgrade.sh                  # Upgrade existing service
+├── remove.sh                   # Remove service
+├── status.sh                   # Show all services status
+├── setup-scripts/
+│   └── common.sh               # Shared utilities
+└── config-generated/           # Auto-generated (gitignored)
+    ├── traefik/
+    │   └── docker-compose.yml  # Traefik configuration
+    ├── services/
+    │   └── <service_name>/
+    │       ├── docker-compose.yml
+    │       ├── .env
+    │       └── .service.conf
+    └── .doppler-tokens/
+        └── <service_name>
+```
+
+## Doppler Configuration
+
+### Required Environment Variables
+
+Each service must have `PORT` defined in Doppler. All other variables are service-specific.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Yes | Port the service listens on |
+| Others | Varies | Service-specific secrets |
+
+### Generating a Service Token
+
+1. Go to [Doppler Dashboard](https://dashboard.doppler.com)
+2. Select your project
+3. Navigate to your config (e.g., `prd`)
+4. Go to **Access** → **Service Tokens**
+5. Generate a new token
+6. Save the token for use with `add.sh`
+
+### ShapeShyft API Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Yes | Default: 8020 |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `ENCRYPTION_KEY` | Yes | 64-char hex (`openssl rand -hex 32`) |
+| `FIREBASE_PROJECT_ID` | Yes | Firebase project ID |
+| `FIREBASE_CLIENT_EMAIL` | Yes | Firebase service account email |
+| `FIREBASE_PRIVATE_KEY` | Yes | Firebase private key |
+| `REVENUECAT_API_KEY` | No | RevenueCat API key |
+
+## Cloudflare Integration
+
+This system works with Cloudflare proxy enabled:
+
+### Setup with Cloudflare
+
+1. **Add DNS record** in Cloudflare:
+   - Type: `A`
+   - Name: `api` (or your subdomain)
+   - Content: Your server IP
+   - Proxy: Can be OFF initially
+
+2. **Run `add.sh`** to deploy your service
+
+3. **Turn on Cloudflare proxy** (orange cloud)
+
+4. **Set SSL mode** to **Full (Strict)**:
+   - Cloudflare Dashboard → SSL/TLS → Overview → Full (Strict)
+
+### Why Full (Strict)?
+
+- **Flexible**: Cloudflare connects to origin via HTTP (breaks - Traefik redirects to HTTPS)
+- **Full**: Cloudflare connects via HTTPS (works)
+- **Full (Strict)**: Same as Full + validates certificate (recommended)
+
+### Certificate Renewal
+
+Let's Encrypt certificates auto-renew. The ACME HTTP challenge works through Cloudflare proxy since Cloudflare forwards HTTP traffic to your origin.
+
+## Manual Operations
+
+### View Service Logs
 
 ```bash
-# Enter config directory
-cd config-generated
-
-# View logs
+cd config-generated/services/<service_name>
 docker compose logs -f
+```
 
-# View specific service logs
-docker compose logs -f shapeshyft_api
+### Restart a Service
 
-# Restart services
+```bash
+cd config-generated/services/<service_name>
 docker compose restart
-
-# Stop services
-docker compose down
-
-# Start services
-docker compose up -d
 ```
 
-## API Access
-
-After setup, APIs are accessible via HTTPS:
-
-| Service | URL |
-|---------|-----|
-| ShapeShyft API | `https://<hostname>/shapeshyft/api/v1/` |
-
-The `/shapeshyft` prefix is stripped before forwarding to the container.
-
-## Adding New Containers
-
-### 1. Create Default Config
+### View Traefik Logs
 
 ```bash
-mkdir -p default-config/new_api
+cd config-generated/traefik
+docker compose logs -f
 ```
 
-Create `default-config/new_api/.env.defaults`:
+### Check SSL Certificate
 
 ```bash
-# Non-sensitive defaults
-PORT=3001
-NODE_ENV=production
-
-# Secrets come from Doppler
-# SECRET_KEY=
+curl -vI https://api.shapeshyft.ai 2>&1 | grep -A5 "Server certificate"
 ```
-
-### 2. Add to Container List
-
-Edit `setup-scripts/common.sh`:
-
-```bash
-CONTAINERS=(
-    "shapeshyft_api:ShapeShyft API:3000"
-    "new_api:New API:3001"  # Add this line
-)
-```
-
-### 3. Add Docker Compose Service
-
-Edit `docker-compose.yml`:
-
-```yaml
-services:
-  # ... existing services ...
-
-  new_api:
-    build:
-      context: ../new_api
-    container_name: new_api
-    restart: unless-stopped
-    env_file:
-      - .env.new_api
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.new-api.rule=Host(`API_HOSTNAME`) && PathPrefix(`/newapi`)"
-      - "traefik.http.routers.new-api.entrypoints=websecure"
-      - "traefik.http.routers.new-api.tls.certresolver=letsencrypt"
-      - "traefik.http.middlewares.newapi-strip.stripprefix.prefixes=/newapi"
-      - "traefik.http.routers.new-api.middlewares=newapi-strip"
-      - "traefik.http.services.new-api.loadbalancer.server.port=3001"
-    networks:
-      - sudobility_network
-```
-
-### 4. Create Doppler Config
-
-1. Add a new config in Doppler named `new_api`
-2. Add required secrets
-3. Generate a service token
-
-### 5. Run Setup
-
-```bash
-./setup.sh
-```
-
-The script will prompt for the new container's Doppler token.
 
 ## Troubleshooting
 
-### Container won't start
+### Service won't start
 
 Check logs:
 ```bash
-cd config-generated
-docker compose logs shapeshyft_api
+cd config-generated/services/<service_name>
+docker compose logs
 ```
 
-### SSL certificate issues
+Common issues:
+- Missing `PORT` in Doppler
+- Invalid Doppler token
+- Docker image not found
 
-Ensure:
-- Domain DNS points to your server
-- Ports 80 and 443 are open
-- No other service is using these ports
+### SSL certificate errors
 
-Check Traefik logs:
-```bash
-cd config-generated
-docker compose logs traefik
-```
+1. Ensure DNS points to your server IP
+2. If using Cloudflare, temporarily turn proxy OFF
+3. Check Traefik logs for ACME errors:
+   ```bash
+   cd config-generated/traefik
+   docker compose logs | grep -i acme
+   ```
+
+### 502 Bad Gateway
+
+- Service container might not be running
+- Check service health: `./status.sh`
+- Verify PORT matches what the app listens on
+
+### Connection refused
+
+- Ensure ports 80 and 443 are open on your firewall
+- Check if another service is using these ports
 
 ### Doppler token invalid
 
-Remove saved token and re-run setup:
+Remove and re-add the service:
 ```bash
-rm .doppler-token-shapeshyft_api
-./setup.sh
+./remove.sh  # Select the service
+./add.sh     # Re-add with new token
 ```
 
-### Missing environment variables
+### Reset everything
 
-Check the generated env file:
 ```bash
-cat config-generated/.env.shapeshyft_api
-```
+# Stop all services
+cd config-generated/services
+for dir in */; do (cd "$dir" && docker compose down); done
 
-Verify all required variables are present in Doppler.
+# Stop Traefik
+cd ../traefik && docker compose down
 
-### Reset installation
-
-Remove generated config and start fresh:
-```bash
+# Remove all config
+cd ../..
 rm -rf config-generated
-rm .doppler-token-*
-./setup.sh
+
+# Start fresh
+./add.sh
 ```
 
 ## Security Notes
 
-- Doppler tokens are stored in `.doppler-token-*` files with 600 permissions
-- Environment files in `config-generated/` contain secrets - never commit
+- Doppler tokens stored in `config-generated/.doppler-tokens/` with 600 permissions
+- Service `.env` files contain secrets - never commit
 - All sensitive files are in `.gitignore`
-- HTTPS is enforced via Traefik with automatic HTTP→HTTPS redirect
+- HTTPS enforced via Traefik (HTTP redirects to HTTPS)
+- Traefik dashboard is disabled by default
+
+## Adding Custom Services
+
+Any Docker image can be deployed. Requirements:
+
+1. **PORT environment variable**: Define in Doppler
+2. **Health endpoint** (optional): Implement `GET /health` returning 200
+3. **HTTP server**: Must listen on the PORT
+
+Example for a Node.js app:
+```javascript
+const port = process.env.PORT || 3000;
+app.get('/health', (req, res) => res.status(200).json({ status: 'healthy' }));
+app.listen(port);
+```
 
 ## License
 
