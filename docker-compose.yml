@@ -67,10 +67,10 @@ services:
       # Strip /shapeshyft prefix before forwarding
       - "traefik.http.middlewares.shapeshyft-strip.stripprefix.prefixes=/shapeshyft"
       - "traefik.http.routers.shapeshyft-api.middlewares=shapeshyft-strip"
-      # Service configuration
-      - "traefik.http.services.shapeshyft-api.loadbalancer.server.port=3000"
+      # Service configuration (port from env file)
+      - "traefik.http.services.shapeshyft-api.loadbalancer.server.port=${SHAPESHYFT_PORT:-3000}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/"]
       interval: 30s
       timeout: 15s
       retries: 3

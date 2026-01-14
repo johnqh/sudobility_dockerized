@@ -89,9 +89,9 @@ get_docker_compose_cmd() {
 }
 
 # List of containers to manage (add new containers here)
-# Format: container_name:display_name:port
+# Format: container_name:display_name
 CONTAINERS=(
-    "shapeshyft_api:ShapeShyft API:3000"
+    "shapeshyft_api:ShapeShyft API"
 )
 
 # Required environment variables per container (add new containers here)
@@ -123,18 +123,6 @@ get_container_display_name() {
         fi
     done
     echo "$name"
-}
-
-# Get container port
-get_container_port() {
-    local name="$1"
-    for container in "${CONTAINERS[@]}"; do
-        if [[ "${container%%:*}" == "$name" ]]; then
-            echo "${container##*:}"
-            return
-        fi
-    done
-    echo "3000"
 }
 
 # Secure file permissions

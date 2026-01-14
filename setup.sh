@@ -118,6 +118,23 @@ print_header "Step 5: Setting up Docker Compose"
 cp docker-compose.yml "${CONFIG_DIR}/docker-compose.yml"
 print_success "Docker Compose template copied"
 
+# Create .env file for docker-compose variable substitution
+# Extract PORT from each container's env file
+print_info "Creating docker-compose environment file..."
+echo "# Docker Compose environment variables (auto-generated)" > "${CONFIG_DIR}/.env"
+for container_name in $(get_container_names); do
+    env_file="${CONFIG_DIR}/.env.${container_name}"
+    if [ -f "$env_file" ]; then
+        port=$(grep "^PORT=" "$env_file" | cut -d'=' -f2 | tr -d '"')
+        if [ -n "$port" ]; then
+            # Convert container name to uppercase for env var (e.g., shapeshyft_api -> SHAPESHYFT_PORT)
+            var_name=$(echo "${container_name}" | tr '[:lower:]' '[:upper:]' | sed 's/_API$//')_PORT
+            echo "${var_name}=${port}" >> "${CONFIG_DIR}/.env"
+            print_success "Set ${var_name}=${port}"
+        fi
+    fi
+done
+
 # Copy dynamic_conf
 mkdir -p "${CONFIG_DIR}/dynamic_conf"
 cp -r dynamic_conf/* "${CONFIG_DIR}/dynamic_conf/"
