@@ -6,9 +6,11 @@ services:
   # Traefik - Reverse Proxy & SSL Termination
   # =============================================================================
   traefik:
-    image: traefik:v3.2
+    image: traefik:latest
     container_name: traefik
     restart: unless-stopped
+    environment:
+      - DOCKER_API_VERSION=1.44
     command:
       # API and Dashboard
       - "--api.dashboard=false"
