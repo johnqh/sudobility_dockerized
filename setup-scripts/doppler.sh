@@ -33,35 +33,36 @@ validate_doppler_token() {
 }
 
 # Prompt for Doppler token for a container
+# Note: All informational output goes to stderr so only the token goes to stdout
 prompt_doppler_token() {
     local container_name="$1"
     local display_name
     display_name=$(get_container_display_name "$container_name")
 
-    echo ""
-    print_info "Doppler configuration for ${display_name}"
-    echo "   Create a service token in Doppler for the ${container_name} config"
-    echo "   Doppler Dashboard → Project → ${container_name} → Access → Service Tokens"
-    echo ""
+    echo "" >&2
+    print_info "Doppler configuration for ${display_name}" >&2
+    echo "   Create a service token in Doppler for the ${container_name} config" >&2
+    echo "   Doppler Dashboard → Project → ${container_name} → Access → Service Tokens" >&2
+    echo "" >&2
 
     local token=""
     local valid=false
 
     while [ "$valid" = false ]; do
-        read -p "Enter Doppler service token for ${container_name}: " token
+        read -p "Enter Doppler service token for ${container_name}: " token </dev/tty
 
         if [ -z "$token" ]; then
-            print_error "Token cannot be empty"
+            print_error "Token cannot be empty" >&2
             continue
         fi
 
-        print_info "Validating token..."
+        print_info "Validating token..." >&2
 
         if validate_doppler_token "$token"; then
-            print_success "Token validated successfully"
+            print_success "Token validated successfully" >&2
             valid=true
         else
-            print_error "Invalid token. Please check and try again."
+            print_error "Invalid token. Please check and try again." >&2
         fi
     done
 
@@ -69,6 +70,7 @@ prompt_doppler_token() {
 }
 
 # Load or prompt for Doppler token
+# Note: All informational output goes to stderr so only the token goes to stdout
 get_doppler_token() {
     local container_name="$1"
     local token_file
@@ -79,14 +81,14 @@ get_doppler_token() {
     # Check for saved token
     if [ -f "$token_file" ]; then
         token=$(cat "$token_file")
-        print_info "Found saved Doppler token for ${container_name}, validating..."
+        print_info "Found saved Doppler token for ${container_name}, validating..." >&2
 
         if validate_doppler_token "$token"; then
-            print_success "Saved token is valid"
+            print_success "Saved token is valid" >&2
             echo "$token"
             return 0
         else
-            print_warning "Saved token is invalid or expired"
+            print_warning "Saved token is invalid or expired" >&2
             rm -f "$token_file"
         fi
     fi
@@ -97,7 +99,7 @@ get_doppler_token() {
     # Save the token
     echo "$token" > "$token_file"
     secure_file "$token_file"
-    print_success "Token saved to ${token_file}"
+    print_success "Token saved to ${token_file}" >&2
 
     echo "$token"
 }
