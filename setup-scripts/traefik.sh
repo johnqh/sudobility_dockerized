@@ -92,19 +92,20 @@ setup_https_redirect() {
 }
 
 # Prompt for hostname configuration
+# Note: All informational output goes to stderr so only the value goes to stdout
 prompt_hostname() {
-    echo ""
-    print_info "API Hostname Configuration"
-    echo "   Enter the hostname where the APIs will be accessible"
-    echo "   Example: api.example.com"
-    echo ""
+    echo "" >&2
+    print_info "API Hostname Configuration" >&2
+    echo "   Enter the hostname where the APIs will be accessible" >&2
+    echo "   Example: api.example.com" >&2
+    echo "" >&2
 
     local hostname=""
     while [ -z "$hostname" ]; do
-        read -p "Enter API hostname: " hostname
+        read -p "Enter API hostname: " hostname </dev/tty
 
         if [ -z "$hostname" ]; then
-            print_error "Hostname cannot be empty"
+            print_error "Hostname cannot be empty" >&2
         fi
     done
 
@@ -112,16 +113,17 @@ prompt_hostname() {
 }
 
 # Prompt for ACME email
+# Note: All informational output goes to stderr so only the value goes to stdout
 prompt_acme_email() {
     local hostname="$1"
     local default_email="admin@${hostname#*.}"  # Extract domain from hostname
 
-    echo ""
-    print_info "Let's Encrypt Email Configuration"
-    echo "   This email will receive certificate expiry notifications"
-    echo ""
+    echo "" >&2
+    print_info "Let's Encrypt Email Configuration" >&2
+    echo "   This email will receive certificate expiry notifications" >&2
+    echo "" >&2
 
-    read -p "Enter email for Let's Encrypt [${default_email}]: " email
+    read -p "Enter email for Let's Encrypt [${default_email}]: " email </dev/tty
     email="${email:-$default_email}"
 
     echo "$email"
