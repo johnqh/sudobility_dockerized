@@ -129,15 +129,21 @@ install_docker() {
 
     # Start and enable docker service (Linux only)
     if ! is_macos; then
-        if ! sudo systemctl is-active --quiet docker; then
-            echo "Starting Docker service..."
-            sudo systemctl start docker || { echo "Error: Failed to start Docker service."; exit 1; }
+        # First check if docker is already working (user might have access without sudo)
+        if docker ps >/dev/null 2>&1; then
+            echo "Docker is running and accessible."
+        else
+            # Need to start Docker service with sudo
+            if ! sudo systemctl is-active --quiet docker; then
+                echo "Starting Docker service..."
+                sudo systemctl start docker || { echo "Error: Failed to start Docker service."; exit 1; }
+            fi
+            if ! sudo systemctl is-enabled --quiet docker; then
+                echo "Enabling Docker service to start on boot..."
+                sudo systemctl enable docker || { echo "Error: Failed to enable Docker service."; exit 1; }
+            fi
+            echo "Docker service started and enabled."
         fi
-        if ! sudo systemctl is-enabled --quiet docker; then
-            echo "Enabling Docker service to start on boot..."
-            sudo systemctl enable docker || { echo "Error: Failed to enable Docker service."; exit 1; }
-        fi
-        echo "Docker service started and enabled."
 
         # Add user to docker group if not already there
         if ! id -nG "$ORIGINAL_USER" | grep -qw "docker"; then
