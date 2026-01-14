@@ -156,11 +156,11 @@ print_header "Step 6: Starting Services"
 
 DOCKER_COMPOSE=$(get_docker_compose_cmd)
 
-print_info "Building and starting containers..."
+print_info "Pulling and starting containers..."
 cd "$CONFIG_DIR"
 
-# Build images
-$DOCKER_COMPOSE build
+# Pull images
+$DOCKER_COMPOSE pull
 
 # Start services
 $DOCKER_COMPOSE up -d

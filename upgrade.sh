@@ -55,7 +55,7 @@ echo ""
 echo "This script will:"
 echo "  1. Update Doppler secrets"
 echo "  2. Update docker-compose.yml"
-echo "  3. Rebuild and restart containers"
+echo "  3. Pull latest images and restart containers"
 echo ""
 
 if ! prompt_yes_no "Continue with upgrade?" "y"; then
@@ -107,10 +107,26 @@ if [ -d "dynamic_conf" ]; then
     print_success "Updated Traefik dynamic configuration"
 fi
 
+# Regenerate .env file for docker-compose variable substitution
+print_info "Updating docker-compose environment file..."
+echo "# Docker Compose environment variables (auto-generated)" > "${CONFIG_DIR}/.env"
+for container_name in $(get_container_names); do
+    env_file="${CONFIG_DIR}/.env.${container_name}"
+    if [ -f "$env_file" ]; then
+        port=$(grep "^PORT=" "$env_file" | cut -d'=' -f2 | tr -d '"')
+        if [ -n "$port" ]; then
+            # Convert container name to uppercase for env var (e.g., shapeshyft_api -> SHAPESHYFT_PORT)
+            var_name=$(echo "${container_name}" | tr '[:lower:]' '[:upper:]' | sed 's/_API$//')_PORT
+            echo "${var_name}=${port}" >> "${CONFIG_DIR}/.env"
+            print_success "Set ${var_name}=${port}"
+        fi
+    fi
+done
+
 # =============================================================================
-# Step 3: Rebuild and Restart Containers
+# Step 3: Pull and Restart Containers
 # =============================================================================
-print_header "Step 3: Rebuilding and Restarting Containers"
+print_header "Step 3: Pulling and Restarting Containers"
 
 DOCKER_COMPOSE=$(get_docker_compose_cmd)
 
@@ -120,13 +136,9 @@ cd "$CONFIG_DIR"
 print_info "Stopping containers..."
 $DOCKER_COMPOSE down
 
-# Pull latest base images
+# Pull latest images for all services
 print_info "Pulling latest images..."
-$DOCKER_COMPOSE pull traefik || true
-
-# Rebuild application images
-print_info "Rebuilding application images..."
-$DOCKER_COMPOSE build --no-cache
+$DOCKER_COMPOSE pull
 
 # Start containers
 print_info "Starting containers..."

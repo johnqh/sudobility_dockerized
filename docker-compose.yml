@@ -72,7 +72,7 @@ services:
       # Service configuration (port from env file)
       - "traefik.http.services.shapeshyft-api.loadbalancer.server.port=${SHAPESHYFT_PORT:-3000}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/"]
+      test: ["CMD", "curl", "-f", "http://localhost:${SHAPESHYFT_PORT:-3000}/health"]
       interval: 30s
       timeout: 15s
       retries: 3
