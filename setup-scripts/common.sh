@@ -94,6 +94,17 @@ CONTAINERS=(
     "shapeshyft_api:ShapeShyft API:3000"
 )
 
+# Required environment variables per container (add new containers here)
+# These are validated during setup to ensure Doppler has all required secrets
+declare -A REQUIRED_ENV_VARS
+REQUIRED_ENV_VARS["shapeshyft_api"]="DATABASE_URL ENCRYPTION_KEY FIREBASE_PROJECT_ID FIREBASE_CLIENT_EMAIL FIREBASE_PRIVATE_KEY"
+
+# Get required env vars for a container
+get_required_env_vars() {
+    local container_name="$1"
+    echo "${REQUIRED_ENV_VARS[$container_name]:-}"
+}
+
 # Get container names only
 get_container_names() {
     for container in "${CONTAINERS[@]}"; do
@@ -160,4 +171,39 @@ CONFIG_DIR="config-generated"
 # Ensure config directory exists
 ensure_config_dir() {
     mkdir -p "$CONFIG_DIR"
+}
+
+# Validate required environment variables for a container
+# Returns 0 if all required vars are present, 1 otherwise
+# Sets MISSING_VARS array with missing variable names
+validate_container_env() {
+    local container_name="$1"
+    local env_file="${CONFIG_DIR}/.env.${container_name}"
+
+    MISSING_VARS=()
+
+    if [ ! -f "$env_file" ]; then
+        print_error "Environment file not created: ${env_file}"
+        return 1
+    fi
+
+    local required_vars
+    required_vars=$(get_required_env_vars "$container_name")
+
+    # If no required vars defined, validation passes
+    if [ -z "$required_vars" ]; then
+        return 0
+    fi
+
+    for var in $required_vars; do
+        if ! grep -q "^${var}=" "$env_file" 2>/dev/null; then
+            MISSING_VARS+=("$var")
+        fi
+    done
+
+    if [ ${#MISSING_VARS[@]} -gt 0 ]; then
+        return 1
+    fi
+
+    return 0
 }

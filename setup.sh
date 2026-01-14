@@ -14,6 +14,12 @@ source "./setup-scripts/doppler.sh"
 source "./setup-scripts/traefik.sh"
 
 # =============================================================================
+# Step 0: Install Dependencies
+# =============================================================================
+print_header "Step 0: Installing Dependencies"
+source "./setup-scripts/deps_setup.sh"
+
+# =============================================================================
 # Main Setup Flow
 # =============================================================================
 
@@ -79,30 +85,27 @@ done
 # =============================================================================
 print_header "Step 4: Validating Configuration"
 
-# Check shapeshyft_api required variables
-SHAPESHYFT_ENV="${CONFIG_DIR}/.env.shapeshyft_api"
+# Validate each container's required environment variables
+validation_failed=false
 
-if [ -f "$SHAPESHYFT_ENV" ]; then
-    missing_vars=()
+for container_name in $(get_container_names); do
+    display_name=$(get_container_display_name "$container_name")
 
-    for var in DATABASE_URL ENCRYPTION_KEY FIREBASE_PROJECT_ID FIREBASE_CLIENT_EMAIL FIREBASE_PRIVATE_KEY; do
-        if ! grep -q "^${var}=" "$SHAPESHYFT_ENV" 2>/dev/null; then
-            missing_vars+=("$var")
+    if ! validate_container_env "$container_name"; then
+        if [ ${#MISSING_VARS[@]} -gt 0 ]; then
+            print_error "Missing required environment variables for ${display_name}:"
+            for var in "${MISSING_VARS[@]}"; do
+                echo "  - ${var}"
+            done
+            validation_failed=true
         fi
-    done
-
-    if [ ${#missing_vars[@]} -gt 0 ]; then
-        print_error "Missing required environment variables in Doppler:"
-        for var in "${missing_vars[@]}"; do
-            echo "  - ${var}"
-        done
-        print_info "Please add these variables to your Doppler configuration and run setup again."
-        exit 1
+    else
+        print_success "${display_name}: All required environment variables present"
     fi
+done
 
-    print_success "All required environment variables are present"
-else
-    print_error "Environment file not created: ${SHAPESHYFT_ENV}"
+if [ "$validation_failed" = true ]; then
+    print_info "Please add missing variables to your Doppler configuration and run setup again."
     exit 1
 fi
 

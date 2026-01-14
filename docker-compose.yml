@@ -53,7 +53,7 @@ services:
   # =============================================================================
   shapeshyft_api:
     build:
-      context: ../shapeshyft_api
+      context: ../../shapeshyft_api
     container_name: shapeshyft_api
     restart: unless-stopped
     env_file:
@@ -86,10 +86,11 @@ services:
 
   # =============================================================================
   # Add more services below following the same pattern:
+  # (Note: context path is relative to config-generated/, so use ../../)
   #
   # new_service:
   #   build:
-  #     context: ../new_service
+  #     context: ../../new_service
   #   container_name: new_service
   #   restart: unless-stopped
   #   env_file:

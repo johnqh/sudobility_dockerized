@@ -10,15 +10,11 @@ cd "$SCRIPT_DIR"
 source "./setup-scripts/common.sh"
 
 # =============================================================================
-# Find Configuration Directory
+# Check Configuration Exists
 # =============================================================================
 
-find_config_dir() {
-    if [ -d "./config-generated" ] && [ -f "./config-generated/docker-compose.yml" ]; then
-        echo "./config-generated"
-    else
-        echo ""
-    fi
+check_config_exists() {
+    [ -d "$CONFIG_DIR" ] && [ -f "${CONFIG_DIR}/docker-compose.yml" ]
 }
 
 # =============================================================================
@@ -82,11 +78,9 @@ echo "  Docker:         $(docker --version 2>/dev/null | awk '{print $3}' | tr -
 echo "  Docker Compose: $(docker compose version 2>/dev/null | awk '{print $4}' || docker-compose --version 2>/dev/null | awk '{print $3}' | tr -d ',')"
 echo ""
 
-# Find config directory
-CONFIG_DIR=$(find_config_dir)
-
-if [ -z "$CONFIG_DIR" ]; then
-    print_warning "No configuration found. Run ./setup.sh first."
+# Check for configuration (CONFIG_DIR is defined in common.sh)
+if ! check_config_exists; then
+    print_warning "No configuration found in ${CONFIG_DIR}/. Run ./setup.sh first."
     exit 0
 fi
 

@@ -14,15 +14,11 @@ source "./setup-scripts/doppler.sh"
 source "./setup-scripts/traefik.sh"
 
 # =============================================================================
-# Find Configuration Directory
+# Check Configuration Exists
 # =============================================================================
 
-find_config_dir() {
-    if [ -d "./config-generated" ] && [ -f "./config-generated/docker-compose.yml" ]; then
-        echo "./config-generated"
-    else
-        echo ""
-    fi
+check_config_exists() {
+    [ -d "$CONFIG_DIR" ] && [ -f "${CONFIG_DIR}/docker-compose.yml" ]
 }
 
 # =============================================================================
@@ -31,11 +27,9 @@ find_config_dir() {
 
 print_header "Sudobility Dockerized Upgrade"
 
-# Find existing configuration
-CONFIG_DIR=$(find_config_dir)
-
-if [ -z "$CONFIG_DIR" ]; then
-    print_error "No existing configuration found."
+# Check for existing configuration (CONFIG_DIR is defined in common.sh)
+if ! check_config_exists; then
+    print_error "No existing configuration found in ${CONFIG_DIR}/"
     print_info "Run ./setup.sh first to create initial configuration."
     exit 1
 fi
