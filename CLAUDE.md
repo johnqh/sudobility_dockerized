@@ -219,3 +219,9 @@ bash -n add.sh
 # Check Traefik logs
 cd config-generated/traefik && docker compose logs -f
 ```
+
+## Workspace Context
+
+This project is part of the **ShapeShyft** multi-project workspace at the parent directory, but operates independently as a deployment tool. See `../CLAUDE.md` for the full architecture of the services this tool deploys.
+
+Changes to deployment scripts affect all services managed by this tool. Test with `./status.sh` before and after changes.
