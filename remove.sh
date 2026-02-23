@@ -66,6 +66,24 @@ fi
 print_header "Step 1: Stopping Service"
 
 service_remove "$SERVICE_NAME"
+
+# Verify the container is actually stopped before proceeding
+CONTAINER_STATUS=$(get_container_status "$SERVICE_NAME")
+if [ "$CONTAINER_STATUS" != "not found" ] && [ "$CONTAINER_STATUS" != "exited" ]; then
+    print_warning "Container still has status: $CONTAINER_STATUS"
+    print_info "Attempting to force stop..."
+    docker stop "$SERVICE_NAME" 2>/dev/null || true
+    docker rm -f "$SERVICE_NAME" 2>/dev/null || true
+
+    # Re-check after forced stop
+    CONTAINER_STATUS=$(get_container_status "$SERVICE_NAME")
+    if [ "$CONTAINER_STATUS" != "not found" ]; then
+        print_error "Failed to stop container '$SERVICE_NAME' (status: $CONTAINER_STATUS)"
+        print_error "Please stop the container manually before removing configuration."
+        exit 1
+    fi
+fi
+
 print_success "Container stopped and removed"
 
 # =============================================================================

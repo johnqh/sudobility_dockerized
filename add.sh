@@ -1,6 +1,11 @@
 #!/bin/bash
 # add.sh - Add a new service to the server
-# Usage: ./add.sh
+# Usage: ./add.sh [--dry-run]
+#
+# Options:
+#   --dry-run   Show what would be done without making any changes.
+#               No directories are created, no secrets are fetched,
+#               and no containers are started.
 
 set -e
 
@@ -11,11 +16,40 @@ cd "$SCRIPT_DIR"
 # Source helper scripts
 source "./setup-scripts/common.sh"
 
+# Parse flags
+DRY_RUN=false
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)
+            DRY_RUN=true
+            ;;
+        --help|-h)
+            echo "Usage: ./add.sh [--dry-run]"
+            echo ""
+            echo "Options:"
+            echo "  --dry-run   Show what would be done without making any changes"
+            echo "  --help      Show this help message"
+            exit 0
+            ;;
+        *)
+            print_error "Unknown option: $arg"
+            echo "Usage: ./add.sh [--dry-run]"
+            exit 1
+            ;;
+    esac
+done
+
 # =============================================================================
 # Main Add Flow
 # =============================================================================
 
-print_header "Add New Service"
+if [ "$DRY_RUN" = true ]; then
+    print_header "Add New Service (DRY RUN)"
+    print_warning "Dry-run mode: no changes will be made"
+    echo ""
+else
+    print_header "Add New Service"
+fi
 
 echo "This script will add a new Docker service with:"
 echo "  - Automatic SSL certificate via Let's Encrypt"
@@ -28,9 +62,17 @@ echo ""
 # =============================================================================
 print_header "Step 1: Checking Traefik"
 
-if ! install_traefik; then
-    print_error "Failed to set up Traefik. Cannot continue."
-    exit 1
+if [ "$DRY_RUN" = true ]; then
+    if is_traefik_running; then
+        print_info "Would verify Traefik is running [already running]"
+    else
+        print_info "Would install and start Traefik"
+    fi
+else
+    if ! install_traefik; then
+        print_error "Failed to set up Traefik. Cannot continue."
+        exit 1
+    fi
 fi
 
 # =============================================================================
@@ -124,44 +166,66 @@ done
 # =============================================================================
 print_header "Step 4: Fetching Environment Variables"
 
-ensure_dirs
+if [ "$DRY_RUN" = true ]; then
+    print_info "Would create directories under ${SERVICES_DIR}/${SERVICE_NAME}/"
+    print_info "Would fetch secrets from Doppler and save to .env"
+    print_info "Would validate that PORT variable exists in Doppler secrets"
+    PORT="<from-doppler>"
+else
+    ensure_dirs
 
-SERVICE_DIR="${SERVICES_DIR}/${SERVICE_NAME}"
-mkdir -p "$SERVICE_DIR"
+    SERVICE_DIR="${SERVICES_DIR}/${SERVICE_NAME}"
+    mkdir -p "$SERVICE_DIR"
 
-ENV_FILE="${SERVICE_DIR}/.env"
-print_info "Fetching secrets from Doppler..."
+    ENV_FILE="${SERVICE_DIR}/.env"
+    print_info "Fetching secrets from Doppler..."
 
-HTTP_CODE=$(fetch_doppler_secrets "$DOPPLER_TOKEN" "$ENV_FILE")
+    HTTP_CODE=$(fetch_doppler_secrets "$DOPPLER_TOKEN" "$ENV_FILE")
 
-if [ "$HTTP_CODE" != "200" ]; then
-    print_error "Failed to fetch secrets from Doppler (HTTP $HTTP_CODE)"
-    rm -rf "$SERVICE_DIR"
-    exit 1
+    if [ "$HTTP_CODE" != "200" ]; then
+        print_error "Failed to fetch secrets from Doppler (HTTP $HTTP_CODE)"
+        rm -rf "$SERVICE_DIR"
+        exit 1
+    fi
+
+    secure_file "$ENV_FILE"
+    print_success "Environment variables saved"
+
+    # Check for PORT variable
+    PORT=$(grep "^PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+
+    if [ -z "$PORT" ]; then
+        print_error "PORT environment variable not found in Doppler secrets"
+        print_info "Please add a PORT variable to your Doppler configuration"
+        rm -rf "$SERVICE_DIR"
+        exit 1
+    fi
+
+    print_success "Found PORT=$PORT"
 fi
-
-secure_file "$ENV_FILE"
-print_success "Environment variables saved"
-
-# Check for PORT variable
-PORT=$(grep "^PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-
-if [ -z "$PORT" ]; then
-    print_error "PORT environment variable not found in Doppler secrets"
-    print_info "Please add a PORT variable to your Doppler configuration"
-    rm -rf "$SERVICE_DIR"
-    exit 1
-fi
-
-print_success "Found PORT=$PORT"
 
 # =============================================================================
 # Step 5: Create service configuration
 # =============================================================================
 print_header "Step 5: Creating Service"
 
-# Save service config
-cat > "${SERVICE_DIR}/.service.conf" << EOF
+if [ "$DRY_RUN" = true ]; then
+    print_info "Would create service config at ${SERVICES_DIR}/${SERVICE_NAME}/.service.conf"
+    print_info "Would save Doppler token to ${TOKENS_DIR}/${SERVICE_NAME}"
+    print_info "Would generate docker-compose.yml at ${SERVICES_DIR}/${SERVICE_NAME}/docker-compose.yml"
+    if [ -n "$HEALTH_ENDPOINT" ]; then
+        print_info "Would include healthcheck for endpoint: ${HEALTH_ENDPOINT}"
+    else
+        print_info "Would skip healthcheck (none configured)"
+    fi
+    print_info "Would configure Traefik labels:"
+    print_info "  - Router rule: Host(\`${HOSTNAME}\`)"
+    print_info "  - Entrypoint: websecure"
+    print_info "  - TLS certresolver: letsencrypt"
+    print_info "  - Load balancer port: ${PORT}"
+else
+    # Save service config
+    cat > "${SERVICE_DIR}/.service.conf" << EOF
 # Service configuration - created by add.sh
 SERVICE_NAME=${SERVICE_NAME}
 HOSTNAME=${HOSTNAME}
@@ -171,24 +235,24 @@ HEALTH_ENDPOINT=${HEALTH_ENDPOINT}
 CREATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
-secure_file "${SERVICE_DIR}/.service.conf"
+    secure_file "${SERVICE_DIR}/.service.conf"
 
-# Save Doppler token
-save_doppler_token "$SERVICE_NAME" "$DOPPLER_TOKEN"
+    # Save Doppler token
+    save_doppler_token "$SERVICE_NAME" "$DOPPLER_TOKEN"
 
-# Create docker-compose.yml for the service
-# Build healthcheck section conditionally
-HEALTHCHECK_SECTION=""
-if [ -n "$HEALTH_ENDPOINT" ]; then
-    HEALTHCHECK_SECTION="    healthcheck:
+    # Create docker-compose.yml for the service
+    # Build healthcheck section conditionally
+    HEALTHCHECK_SECTION=""
+    if [ -n "$HEALTH_ENDPOINT" ]; then
+        HEALTHCHECK_SECTION="    healthcheck:
       test: [\"CMD\", \"curl\", \"-f\", \"http://localhost:${PORT}${HEALTH_ENDPOINT}\"]
       interval: 30s
       timeout: 15s
       retries: 3
       start_period: 30s"
-fi
+    fi
 
-cat > "${SERVICE_DIR}/docker-compose.yml" << EOF
+    cat > "${SERVICE_DIR}/docker-compose.yml" << EOF
 # ${SERVICE_NAME} - Generated by add.sh
 services:
   ${SERVICE_NAME}:
@@ -217,33 +281,53 @@ networks:
     external: true
 EOF
 
-print_success "Service configuration created"
+    print_success "Service configuration created"
+fi
 
 # =============================================================================
 # Step 6: Start the service
 # =============================================================================
 print_header "Step 6: Starting Service"
 
-service_pull "$SERVICE_NAME"
-service_start "$SERVICE_NAME"
+if [ "$DRY_RUN" = true ]; then
+    print_info "Would pull Docker image: ${DOCKER_IMAGE}"
+    print_info "Would start container: ${SERVICE_NAME}"
+else
+    service_pull "$SERVICE_NAME"
+    service_start "$SERVICE_NAME"
+fi
 
 # =============================================================================
 # Step 7: Verify
 # =============================================================================
 print_header "Step 7: Verification"
 
-service_wait_and_verify "$SERVICE_NAME"
-display_service_info "$SERVICE_NAME" name hostname image version port
+if [ "$DRY_RUN" = true ]; then
+    print_info "Would verify container is running"
+    print_info "Would display service info"
+    echo ""
+    echo "Summary of what would be created:"
+    echo "  Service name:    ${SERVICE_NAME}"
+    echo "  Hostname:        ${HOSTNAME}"
+    echo "  Docker image:    ${DOCKER_IMAGE}"
+    echo "  Health endpoint: ${HEALTH_ENDPOINT:-none}"
+    echo "  Config dir:      ${SERVICES_DIR}/${SERVICE_NAME}/"
+    echo ""
+    print_success "Dry run complete. No changes were made."
+else
+    service_wait_and_verify "$SERVICE_NAME"
+    display_service_info "$SERVICE_NAME" name hostname image version port
 
-echo "Access your service at:"
-echo "  https://${HOSTNAME}/"
-echo ""
-echo "Note: SSL certificate may take a minute to be issued."
-echo ""
-echo "Useful commands:"
-echo "  View logs:    cd ${SERVICE_DIR} && docker compose logs -f"
-echo "  Restart:      cd ${SERVICE_DIR} && docker compose restart"
-echo "  Stop:         cd ${SERVICE_DIR} && docker compose down"
-echo ""
+    echo "Access your service at:"
+    echo "  https://${HOSTNAME}/"
+    echo ""
+    echo "Note: SSL certificate may take a minute to be issued."
+    echo ""
+    echo "Useful commands:"
+    echo "  View logs:    cd ${SERVICE_DIR} && docker compose logs -f"
+    echo "  Restart:      cd ${SERVICE_DIR} && docker compose restart"
+    echo "  Stop:         cd ${SERVICE_DIR} && docker compose down"
+    echo ""
 
-print_success "Service '$SERVICE_NAME' added successfully!"
+    print_success "Service '$SERVICE_NAME' added successfully!"
+fi

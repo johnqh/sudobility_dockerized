@@ -84,7 +84,11 @@ prompt_yes_no() {
 # Traefik Management
 # =============================================================================
 
-# Ensure Docker network exists
+# Ensure the shared Docker bridge network exists.
+# All services and Traefik communicate over "sudobility_network".
+# This function is idempotent: it creates the network only if missing.
+# The network is also defined in Traefik's docker-compose.yml, but we
+# pre-create it here so services can be started in any order.
 ensure_network() {
     if ! docker network ls --format '{{.Name}}' 2>/dev/null | grep -q "^sudobility_network$"; then
         docker network create sudobility_network >/dev/null 2>&1 || true
@@ -109,33 +113,67 @@ install_traefik() {
     ensure_network
 
     # Create Traefik docker-compose.yml
+    # This template configures Traefik as the single entry point for all services.
+    # Traefik listens on ports 80 (HTTP) and 443 (HTTPS), automatically discovers
+    # backend services via Docker labels, and provisions SSL certificates from
+    # Let's Encrypt using the HTTP-01 ACME challenge.
     cat > "${TRAEFIK_DIR}/docker-compose.yml" << 'EOF'
 # Traefik - Reverse Proxy & SSL Termination
+# ==========================================================================
+# This is the central reverse proxy for all services managed by sudobility.
+# It handles:
+#   1. SSL termination with auto-provisioned Let's Encrypt certificates
+#   2. Host-based routing to backend containers (via Docker labels)
+#   3. HTTP-to-HTTPS redirection for all traffic
+#
+# Services register themselves by adding Traefik Docker labels (see add.sh).
+# Traefik discovers them automatically via the Docker socket.
+# ==========================================================================
 services:
   traefik:
     image: traefik:latest
     container_name: traefik
     restart: unless-stopped
     command:
-      - "--api.dashboard=false"
-      - "--api.insecure=false"
+      # --- API / Dashboard ---
+      - "--api.dashboard=false"           # Dashboard disabled for security
+      - "--api.insecure=false"            # No insecure API endpoint
+
+      # --- Docker Provider ---
+      # Traefik watches the Docker socket for container start/stop events.
+      # Only containers with "traefik.enable=true" label are exposed.
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=sudobility_network"
+
+      # --- Entrypoints ---
+      # "web" listens on port 80 (HTTP) and redirects all traffic to "websecure".
+      # "websecure" listens on port 443 (HTTPS) and terminates TLS.
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+
+      # --- Let's Encrypt (ACME) ---
+      # Uses HTTP-01 challenge: Let's Encrypt sends a request to port 80,
+      # Traefik responds with a token to prove domain ownership.
+      # Requirements:
+      #   - Port 80 must be accessible from the internet
+      #   - DNS must point to this server BEFORE requesting a certificate
+      # Certificates are stored in a Docker volume to survive restarts.
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=admin@sudobility.com"
       - "--certificatesresolvers.letsencrypt.acme.storage=/data/acme.json"
+
       - "--log.level=INFO"
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80"     # HTTP  - used for ACME challenges + redirect to HTTPS
+      - "443:443"   # HTTPS - all service traffic terminates here
     volumes:
+      # Docker socket (read-only) lets Traefik discover running containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Named volume persists ACME certificates across container restarts
       - traefik_data:/data
     networks:
       - sudobility_network
@@ -145,10 +183,15 @@ services:
         max-size: "10m"
         max-file: "3"
 
+# Persistent volume for ACME certificate storage
 volumes:
   traefik_data:
     name: sudobility_traefik_data
 
+# Shared network: all services and Traefik must be on this network
+# so Traefik can forward traffic to service containers.
+# Created as a bridge network by the first "docker compose up" (Traefik).
+# Other services reference it as "external: true" in their own compose files.
 networks:
   sudobility_network:
     name: sudobility_network
