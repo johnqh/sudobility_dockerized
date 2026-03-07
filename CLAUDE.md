@@ -207,19 +207,6 @@ Each service must have these in Doppler:
 4. **Service names**: Must be unique across all services (used as container name)
 5. **macOS**: Scripts use bash 3.x compatible patterns (no mapfile)
 
-## Testing
-
-```bash
-# Check syntax
-bash -n add.sh
-
-# View all services
-./status.sh
-
-# Check Traefik logs
-cd config-generated/traefik && docker compose logs -f
-```
-
 ## Workspace Context
 
 This project is part of the **ShapeShyft** multi-project workspace at the parent directory, but operates independently as a deployment tool. See `../CLAUDE.md` for the full architecture of the services this tool deploys.
