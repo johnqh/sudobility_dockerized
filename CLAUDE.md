@@ -1,5 +1,10 @@
 # CLAUDE.md - AI Development Context
 
+> **Git policy — never auto-commit or auto-push.** Leave your work in the working tree.
+> Run `git commit`, `git push`, `gh pr create`, or `scripts/push_all.sh` **only when the user
+> explicitly asks in that turn**. Approval for an earlier change does not carry forward, and
+> finishing a task is not permission to commit it.
+
 ## Project Overview
 
 **Sudobility Dockerized** is a flexible Docker deployment system for managing multiple backend services. It provides automated add, upgrade, and remove scripts with Traefik reverse proxy, automatic SSL via Let's Encrypt, and Doppler secrets management.
@@ -212,3 +217,7 @@ Each service must have these in Doppler:
 This project is part of the **ShapeShyft** multi-project workspace at the parent directory, but operates independently as a deployment tool. See `../CLAUDE.md` for the full architecture of the services this tool deploys.
 
 Changes to deployment scripts affect all services managed by this tool. Test with `./status.sh` before and after changes.
+
+## Git Workflow
+
+- Do not use feature branches for code changes. Always stay on the current branch.
